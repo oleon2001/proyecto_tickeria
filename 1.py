@@ -24,6 +24,7 @@ class DatabaseConnector:
                 database='glpidb',
                 port='3306'
             )
+            
             if self.conexion.is_connected():
                 print("Conexión exitosa")
         except mysql.connector.Error as err:
@@ -269,7 +270,7 @@ class MainWindow(QMainWindow):
                 gt.is_deleted = 0
                 AND gt.status > 4
                 AND gt.solvedate BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
-                AND gt.date BETWEEN %s AND %s
+                AND gt.date BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
                 AND ge.completename IS NOT NULL
                 AND LOCATE('@', ge.completename) = 0
                 AND LOCATE('CASOS DUPLICADOS', UPPER(ge.completename)) = 0
@@ -372,18 +373,18 @@ class MainWindow(QMainWindow):
         fecha_fin = self.fecha_fin.text()
 
         query2 = """
-SELECT gi.items_id AS Nro_Ticket,
-    MAX(DATE_FORMAT(gi.date_approval,GET_FORMAT(DATE,'ISO'))) AS Fecha_Reapertura,
-    MAX(DATE_FORMAT(gt.date_creation,GET_FORMAT(DATE,'ISO'))) AS Fecha_Apertura,
-    CONCAT(gu.realname, " ", gu.firstname) AS Tecnico_Asignado
-FROM glpi_itilsolutions gi
-INNER JOIN glpi_tickets gt ON gt.id = gi.items_id
-INNER JOIN glpi_users gu ON gu.id = gi.users_id
-WHERE gi.status = 4 
-    AND gi.users_id_approval > 0 
-    AND CONVERT_TZ(gi.date_approval,'UTC', 'America/Caracas') BETWEEN %s AND %s
-    AND CONCAT(gu.realname, ' ', gu.firstname) = %s
-GROUP BY Nro_Ticket;
+        SELECT gi.items_id AS Nro_Ticket,
+            MAX(DATE_FORMAT(gi.date_approval,GET_FORMAT(DATE,'ISO'))) AS Fecha_Reapertura,
+            MAX(DATE_FORMAT(gt.date_creation,GET_FORMAT(DATE,'ISO'))) AS Fecha_Apertura,
+            CONCAT(gu.realname, " ", gu.firstname) AS Tecnico_Asignado
+        FROM glpi_itilsolutions gi
+        INNER JOIN glpi_tickets gt ON gt.id = gi.items_id
+        INNER JOIN glpi_users gu ON gu.id = gi.users_id
+        WHERE gi.status = 4 
+            AND gi.users_id_approval > 0 
+            AND CONVERT_TZ(gi.date_approval,'UTC', 'America/Caracas') BETWEEN %s AND %s
+            AND CONCAT(gu.realname, ' ', gu.firstname) = %s
+        GROUP BY Nro_Ticket;
 """
 
         self.worker_thread = WorkerThread(self.conexion, query2, (f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59', tecnico))
