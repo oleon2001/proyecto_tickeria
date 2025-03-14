@@ -80,6 +80,7 @@ class MainWindow(QMainWindow):
         self.tecnicos = db_connector.obtener_tecnicos()
         self.tecnicos_seleccionados = []
         self.loading_dialog = LoadingDialog(self)
+        self.query = ""  # Initialize the query attribute
         self.setup_ui()
 
     def setup_ui(self):
@@ -224,81 +225,86 @@ class MainWindow(QMainWindow):
             tecnicos_str = "', '".join(self.tecnicos_seleccionados)
             tecnicos_condicion = f"AND CONCAT(gu.realname, ' ', gu.firstname) IN ('{tecnicos_str}')"
 
-        query = f"""
-                SELECT 
-            tecnico_asignado,
-            COUNT(DISTINCT ticket_id) AS total_tickets_cerrados,
-            SUM(tickets_fuera_del_plazo) AS tickets_fuera_del_plazo,
-            SUM(tickets_en_plazo) AS tickets_en_plazo,
-            ROUND(100 * SUM(tickets_fuera_del_plazo) / NULLIF(COUNT(DISTINCT ticket_id), 0), 2) AS porcentaje_fuera_del_plazo,
-            ROUND(100 * SUM(tickets_en_plazo) / NULLIF(COUNT(DISTINCT ticket_id), 0), 2) AS porcentaje_en_plazo,
-            SUM(cuenta_de_tickets_reabiertos) AS cuenta_de_tickets_reabiertos
-        FROM (
+        # Update the query attribute
+        self.query = f"""
             SELECT
-                CONCAT(gu.realname, ' ', gu.firstname) AS tecnico_asignado,
-                gt.id AS ticket_id,
-                CASE 
-                    WHEN gt.time_to_resolve IS NOT NULL 
-                        AND (gis.date_mod > gt.time_to_resolve 
-                        OR (gis.date_mod IS NULL AND gt.time_to_resolve < NOW()))
-                    THEN 1 ELSE 0 END AS tickets_fuera_del_plazo,
-                CASE 
-                    WHEN gt.time_to_resolve IS NOT NULL 
-                        AND gis.date_mod <= gt.time_to_resolve 
-                    THEN 1 ELSE 0 END AS tickets_en_plazo,
-                SUM(CASE 
-                    WHEN gis.status = 4 
-                        AND gis.users_id_approval > 0 
-                        AND CONVERT_TZ(gis.date_approval, 'UTC', 'America/Caracas') BETWEEN %s AND %s
-                    THEN 1 ELSE 0 END) AS cuenta_de_tickets_reabiertos
-            FROM
-                glpi_tickets gt
-            JOIN glpi_entities ge ON
-                gt.entities_id = ge.id
-            JOIN glpi_tickets_users t_users_tec ON
-                gt.id = t_users_tec.tickets_id
-                AND t_users_tec.type = 2
-            JOIN glpi_users gu ON
-                t_users_tec.users_id = gu.id
-            LEFT JOIN glpi_itilsolutions gis ON
-                gt.id = gis.items_id
-                AND gis.itemtype = 'Ticket'
-            #LEFT JOIN glpi_itilsolutions gi ON
-            #   gt.id = gi.items_id
-            #  AND gi.itemtype = 'Ticket'
-            WHERE
-                gt.is_deleted = 0
-                AND gt.status > 4
-                AND gt.solvedate BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
-                AND gt.date BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
-                AND ge.completename IS NOT NULL
-                AND LOCATE('@', ge.completename) = 0
-                AND LOCATE('CASOS DUPLICADOS', UPPER(ge.completename)) = 0
-                #AND TRIM(UPPER(SUBSTRING_INDEX(SUBSTRING(ge.completename, LENGTH(SUBSTRING_INDEX(ge.completename, ">", 1)) + 2), ">", 1))) = 'EPA'
-                {tecnicos_condicion}
+                resultado.tecnico_asignado,
+                COUNT(DISTINCT resultado.ticket_id) AS total_tickets_cerrados,
+                SUM(resultado.tickets_fuera_del_plazo) AS tickets_fuera_del_plazo,
+                SUM(resultado.tickets_en_plazo) AS tickets_en_plazo,
+                ROUND(100 * SUM(resultado.tickets_fuera_del_plazo) / NULLIF(COUNT(DISTINCT resultado.ticket_id), 0), 2) AS porcentaje_fuera_del_plazo,
+                ROUND(100 * SUM(resultado.tickets_en_plazo) / NULLIF(COUNT(DISTINCT resultado.ticket_id), 0), 2) AS porcentaje_en_plazo,
+                COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) AS cuenta_de_tickets_reabiertos
+            FROM (
+                SELECT
+                    CONCAT(gu.realname, ' ', gu.firstname) AS tecnico_asignado,
+                    gt.id AS ticket_id,
+                    CASE
+                        WHEN gt.time_to_resolve IS NOT NULL
+                            AND (gis.date_creation > gt.time_to_resolve
+                                OR gis.date_creation IS NULL AND gt.time_to_resolve < NOW()
+                                OR gt.date_creation < CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                                OR gt.date_creation > CONVERT_TZ(%s, 'America/Caracas', 'UTC'))
+                           THEN 1
+                        ELSE 0
+                    END AS tickets_fuera_del_plazo,
+                    CASE
+                        WHEN gt.time_to_resolve IS NOT NULL
+                            AND gis.date_creation <= gt.time_to_resolve
+                            AND gt.date_creation BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                           THEN 1
+                        ELSE 0
+                    END AS tickets_en_plazo
+                FROM
+                    glpi_tickets gt
+                JOIN glpi_entities ge ON gt.entities_id = ge.id
+                JOIN glpi_tickets_users t_users_tec ON gt.id = t_users_tec.tickets_id AND t_users_tec.type = 2
+                JOIN glpi_users gu ON t_users_tec.users_id = gu.id
+                LEFT JOIN glpi_itilsolutions gis ON gt.id = gis.items_id AND gis.itemtype = 'Ticket'
+                WHERE
+                    gt.is_deleted = 0
+                    AND gt.status > 4
+                    AND gt.solvedate BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                    AND gt.date BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                    AND ge.completename IS NOT NULL
+                    AND LOCATE('@', ge.completename) = 0
+                    AND LOCATE('CASOS DUPLICADOS', UPPER(ge.completename)) = 0
+                    {tecnicos_condicion}
+                GROUP BY
+                    tecnico_asignado,
+                    gt.id
+            ) AS resultado
+            LEFT JOIN (
+                SELECT
+                    CONCAT(gu.realname, ' ', gu.firstname) AS tecnico_asignado,
+                    COUNT(DISTINCT gi.items_id) AS cuenta_de_tickets_reabiertos
+                FROM
+                    glpi_itilsolutions gi
+                INNER JOIN glpi_tickets gt ON gi.items_id = gt.id
+                INNER JOIN glpi_users gu ON gi.users_id = gu.id
+                WHERE
+                    gi.status = 4
+                    AND gi.users_id_approval > 0
+                    AND CONVERT_TZ(gi.date_approval, 'UTC', 'America/Caracas') BETWEEN %s AND %s
+                GROUP BY
+                    tecnico_asignado
+            ) AS reabiertos ON resultado.tecnico_asignado = reabiertos.tecnico_asignado
             GROUP BY
-                tecnico_asignado, gt.id
-        ) AS resultado
-        GROUP BY
-            tecnico_asignado
-        HAVING 
-            total_tickets_cerrados IS NOT NULL
-            AND tickets_fuera_del_plazo IS NOT NULL
-            AND tickets_en_plazo IS NOT NULL
-            AND porcentaje_fuera_del_plazo IS NOT NULL
-            AND porcentaje_en_plazo IS NOT NULL
-            AND cuenta_de_tickets_reabiertos IS NOT NULL
-        ORDER BY
-            tecnico_asignado;   
+                resultado.tecnico_asignado
+            HAVING
+                total_tickets_cerrados IS NOT NULL
+            ORDER BY
+                resultado.tecnico_asignado;
         """
 
         # Mostrar el diálogo de carga
         self.loading_dialog.show()
 
         # Crear el hilo y conectarlo al método para manejar resultados
-        self.worker_thread = WorkerThread(self.conexion, query, (f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59', f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59', f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59'))
+        self.worker_thread = WorkerThread(self.conexion, self.query, (f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59', f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59', f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59'))
         self.worker_thread.done.connect(self.handle_resultados)
         self.worker_thread.start()
+
 
     def handle_resultados(self, resultados):
         print("Handling resultados:", resultados)  # Debug: visualiza los resultados
