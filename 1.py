@@ -225,7 +225,7 @@ class MainWindow(QMainWindow):
             tecnicos_str = "', '".join(self.tecnicos_seleccionados)
             tecnicos_condicion = f"AND CONCAT(gu.realname, ' ', gu.firstname) IN ('{tecnicos_str}')"
 
-        # Update the query attribute
+        # Update the query attribute with corrected placeholders
         self.query = f"""
             SELECT
                 resultado.tecnico_asignado,
@@ -300,8 +300,22 @@ class MainWindow(QMainWindow):
         # Mostrar el diálogo de carga
         self.loading_dialog.show()
 
-        # Crear el hilo y conectarlo al método para manejar resultados
-        self.worker_thread = WorkerThread(self.conexion, self.query, (f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59', f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59', f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59'))
+        # Parámetros corregidos para incluir todos los placeholders necesarios (10 parámetros)
+        params = (
+            f'{fecha_ini} 00:00:00',  # Para el primer CASE (gt.date_creation <)
+            f'{fecha_fin} 23:59:59',  # Para el primer CASE (gt.date_creation >)
+            f'{fecha_ini} 00:00:00',  # Para el segundo CASE (BETWEEN start)
+            f'{fecha_fin} 23:59:59',  # Para el segundo CASE (BETWEEN end)
+            f'{fecha_ini} 00:00:00',  # Para solvedate BETWEEN start
+            f'{fecha_fin} 23:59:59',   # Para solvedate BETWEEN end
+            f'{fecha_ini} 00:00:00',  # Para date BETWEEN start
+            f'{fecha_fin} 23:59:59',   # Para date BETWEEN end
+            f'{fecha_ini} 00:00:00',  # Para reabiertos BETWEEN start
+            f'{fecha_fin} 23:59:59'    # Para reabiertos BETWEEN end
+        )
+
+        # Crear el hilo con los parámetros corregidos
+        self.worker_thread = WorkerThread(self.conexion, self.query, params)
         self.worker_thread.done.connect(self.handle_resultados)
         self.worker_thread.start()
 
@@ -327,7 +341,7 @@ class MainWindow(QMainWindow):
         
         if df_tickets.empty:
             print("DataFrame está vacío")  # Debug
-            QMessageBox.information(self, "Sin resultados", "No hay datos para mostrar.")
+            QMessageBox.information(self, "Sin resultados", "No hay datos para mostrar")
             return
 
         self.resultado_dlg = QDialog(self)
