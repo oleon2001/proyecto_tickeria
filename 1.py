@@ -225,55 +225,87 @@ class MainWindow(QMainWindow):
             tecnicos_str = "', '".join(self.tecnicos_seleccionados)
             tecnicos_condicion = f"AND CONCAT(gu.realname, ' ', gu.firstname) IN ('{tecnicos_str}')"
 
-        # Update the query attribute with corrected placeholders
+        # Actualizar el query con la estructura proporcionada
         self.query = f"""
             SELECT
-                resultado.tecnico_asignado,
-                COUNT(DISTINCT resultado.ticket_id) AS total_tickets_cerrados,
-                SUM(resultado.tickets_fuera_del_plazo) AS tickets_fuera_del_plazo,
-                SUM(resultado.tickets_en_plazo) AS tickets_en_plazo,
-                ROUND(100 * SUM(resultado.tickets_fuera_del_plazo) / NULLIF(COUNT(DISTINCT resultado.ticket_id), 0), 2) AS porcentaje_fuera_del_plazo,
-                ROUND(100 * SUM(resultado.tickets_en_plazo) / NULLIF(COUNT(DISTINCT resultado.ticket_id), 0), 2) AS porcentaje_en_plazo,
+                recibidos.tecnico_asignado,
+                COALESCE(recibidos.total_tickets_del_mes, 0) AS Cant_tickets_recibidos,
+                COALESCE(cerrados_count.total_tickets_cerrados, 0) AS total_tickets_cerrados,
+                COALESCE(cerrados_sla.Cant_tickets_cerrados_con_SLA, 0) AS Cant_tickets_cerrados_con_SLA,
+                COALESCE(cerrados_sla.Cant_tickets_cerrados_dentro_SLA, 0) AS Cant_tickets_cerrados_dentro_SLA,
+                ROUND(100 * COALESCE(cerrados_sla.Cant_tickets_cerrados_con_SLA, 0) / NULLIF(cerrados_count.total_tickets_cerrados, 0), 2) AS porcentaje_fuera_del_plazo,
+                ROUND(100 * COALESCE(cerrados_sla.Cant_tickets_cerrados_dentro_SLA, 0) / NULLIF(cerrados_count.total_tickets_cerrados, 0), 2) AS porcentaje_en_plazo,
                 COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) AS cuenta_de_tickets_reabiertos
             FROM (
                 SELECT
                     CONCAT(gu.realname, ' ', gu.firstname) AS tecnico_asignado,
-                    gt.id AS ticket_id,
-                    CASE
-                        WHEN gt.time_to_resolve IS NOT NULL
-                            AND (gis.date_creation > gt.time_to_resolve
-                                OR gis.date_creation IS NULL AND gt.time_to_resolve < NOW()
-                                OR gt.date_creation < CONVERT_TZ(%s, 'America/Caracas', 'UTC')
-                                OR gt.date_creation > CONVERT_TZ(%s, 'America/Caracas', 'UTC'))
-                           THEN 1
-                        ELSE 0
-                    END AS tickets_fuera_del_plazo,
-                    CASE
-                        WHEN gt.time_to_resolve IS NOT NULL
-                            AND gis.date_creation <= gt.time_to_resolve
-                            AND gt.date_creation BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
-                           THEN 1
-                        ELSE 0
-                    END AS tickets_en_plazo
+                    COUNT(DISTINCT gt.id) AS total_tickets_del_mes
                 FROM
                     glpi_tickets gt
                 JOIN glpi_entities ge ON gt.entities_id = ge.id
                 JOIN glpi_tickets_users t_users_tec ON gt.id = t_users_tec.tickets_id AND t_users_tec.type = 2
                 JOIN glpi_users gu ON t_users_tec.users_id = gu.id
-                LEFT JOIN glpi_itilsolutions gis ON gt.id = gis.items_id AND gis.itemtype = 'Ticket'
+                WHERE
+                    gt.is_deleted = 0
+                    AND ge.completename IS NOT NULL
+                    AND LOCATE('@', ge.completename) = 0
+                    AND LOCATE('CASOS DUPLICADOS', UPPER(ge.completename)) = 0
+                    AND gt.date BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                                    AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                    {tecnicos_condicion}
+                GROUP BY
+                    tecnico_asignado
+            ) AS recibidos
+            LEFT JOIN (
+                SELECT
+                    CONCAT(gu.realname, ' ', gu.firstname) AS tecnico_asignado,
+                    COUNT(DISTINCT gt.id) AS total_tickets_cerrados
+                FROM
+                    glpi_tickets gt
+                JOIN glpi_entities ge ON gt.entities_id = ge.id
+                JOIN glpi_tickets_users t_users_tec ON gt.id = t_users_tec.tickets_id AND t_users_tec.type = 2
+                JOIN glpi_users gu ON t_users_tec.users_id = gu.id
                 WHERE
                     gt.is_deleted = 0
                     AND gt.status > 4
-                    AND gt.solvedate BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
-                    AND gt.date BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                    AND gt.solvedate BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                                        AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                    AND gt.date BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                                    AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
                     AND ge.completename IS NOT NULL
                     AND LOCATE('@', ge.completename) = 0
                     AND LOCATE('CASOS DUPLICADOS', UPPER(ge.completename)) = 0
                     {tecnicos_condicion}
                 GROUP BY
-                    tecnico_asignado,
-                    gt.id
-            ) AS resultado
+                    tecnico_asignado
+            ) AS cerrados_count ON recibidos.tecnico_asignado = cerrados_count.tecnico_asignado
+            LEFT JOIN (
+                SELECT
+                    CONCAT(gu.realname, ' ', gu.firstname) AS tecnico_asignado,
+                    SUM(CASE WHEN gt.time_to_resolve IS NOT NULL THEN 1 ELSE 0 END) AS Cant_tickets_cerrados_con_SLA,
+                    SUM(
+                        CASE 
+                            WHEN gt.solvedate <= gt.time_to_resolve THEN 1 
+                            ELSE 0 
+                        END
+                    ) AS Cant_tickets_cerrados_dentro_SLA
+                FROM
+                    glpi_tickets gt
+                JOIN glpi_entities ge ON gt.entities_id = ge.id
+                JOIN glpi_tickets_users t_users_tec ON gt.id = t_users_tec.tickets_id AND t_users_tec.type = 2
+                JOIN glpi_users gu ON t_users_tec.users_id = gu.id
+                WHERE
+                    gt.is_deleted = 0
+                    AND gt.status > 4
+                    AND gt.solvedate BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                                        AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                    AND ge.completename IS NOT NULL
+                    AND LOCATE('@', ge.completename) = 0
+                    AND LOCATE('CASOS DUPLICADOS', UPPER(ge.completename)) = 0
+                    {tecnicos_condicion}
+                GROUP BY
+                    tecnico_asignado
+            ) AS cerrados_sla ON recibidos.tecnico_asignado = cerrados_sla.tecnico_asignado
             LEFT JOIN (
                 SELECT
                     CONCAT(gu.realname, ' ', gu.firstname) AS tecnico_asignado,
@@ -288,93 +320,75 @@ class MainWindow(QMainWindow):
                     AND CONVERT_TZ(gi.date_approval, 'UTC', 'America/Caracas') BETWEEN %s AND %s
                 GROUP BY
                     tecnico_asignado
-            ) AS reabiertos ON resultado.tecnico_asignado = reabiertos.tecnico_asignado
-            GROUP BY
-                resultado.tecnico_asignado
-            HAVING
-                total_tickets_cerrados IS NOT NULL
+            ) AS reabiertos ON recibidos.tecnico_asignado = reabiertos.tecnico_asignado
             ORDER BY
-                resultado.tecnico_asignado;
+                recibidos.tecnico_asignado;
         """
 
-        # Mostrar el diálogo de carga
+        # Mostrar diálogo de carga
         self.loading_dialog.show()
 
-        # Parámetros corregidos para incluir todos los placeholders necesarios (10 parámetros)
+        # Parámetros ajustados para los 10 placeholders
         params = (
-            f'{fecha_ini} 00:00:00',  # Para el primer CASE (gt.date_creation <)
-            f'{fecha_fin} 23:59:59',  # Para el primer CASE (gt.date_creation >)
-            f'{fecha_ini} 00:00:00',  # Para el segundo CASE (BETWEEN start)
-            f'{fecha_fin} 23:59:59',  # Para el segundo CASE (BETWEEN end)
-            f'{fecha_ini} 00:00:00',  # Para solvedate BETWEEN start
-            f'{fecha_fin} 23:59:59',   # Para solvedate BETWEEN end
-            f'{fecha_ini} 00:00:00',  # Para date BETWEEN start
-            f'{fecha_fin} 23:59:59',   # Para date BETWEEN end
-            f'{fecha_ini} 00:00:00',  # Para reabiertos BETWEEN start
-            f'{fecha_fin} 23:59:59'    # Para reabiertos BETWEEN end
+            # Recibidos
+            f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59',
+            # Cerrados_count (solvedate y date)
+            f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59',
+            f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59',
+            # Cerrados_sla (solvedate)
+            f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59',
+            # Reabiertos
+            f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59'
         )
 
-        # Crear el hilo con los parámetros corregidos
+        # Crear hilo con parámetros
         self.worker_thread = WorkerThread(self.conexion, self.query, params)
         self.worker_thread.done.connect(self.handle_resultados)
         self.worker_thread.start()
 
-
-    def handle_resultados(self, resultados):
-        print("Handling resultados:", resultados)  # Debug: visualiza los resultados
-        # Ocultar el diálogo de carga
-        self.loading_dialog.hide()
-        
-        if not resultados:
-            QMessageBox.information(self, "Información", "No se encontraron resultados.")
-            return
-
-        # Mostrar resultados
-        self.mostrar_resultados(resultados)
-
     def mostrar_resultados(self, resultados):
+        # Actualizar nombres de columnas según el nuevo query
         df_tickets = pd.DataFrame(resultados, columns=[
-            "Tecnico_Asignado", "Numero_De_Tickets", "Tickets_Fuera_De_Plazo", 
-            "Tickets_En_Plazo", "Porcentaje_Fuera_De_Plazo", "Porcentaje_En_Plazo", 
-            "Cuenta_De_Tickets_Reabiertos"
+            "Tecnico_Asignado", "Cant_tickets_recibidos", "total_tickets_cerrados",
+            "Cant_tickets_cerrados_con_SLA", "Cant_tickets_cerrados_dentro_SLA",
+            "porcentaje_fuera_del_plazo", "porcentaje_en_plazo", "cuenta_de_tickets_reabiertos"
         ])
         
         if df_tickets.empty:
-            print("DataFrame está vacío")  # Debug
             QMessageBox.information(self, "Sin resultados", "No hay datos para mostrar")
             return
 
         self.resultado_dlg = QDialog(self)
         self.resultado_dlg.setWindowTitle("Resultados")
-        self.resultado_dlg.setGeometry(150, 150, 800, 600)
+        self.resultado_dlg.setGeometry(150, 150, 1000, 600)
 
         tree = QTreeWidget(self.resultado_dlg)
         tree.setHeaderLabels([
-            "Técnico", "Número de Tickets", "Fuera de Plazo", "En Plazo", 
-            "Porcentaje Fuera", "Porcentaje En", "Cuenta de Tickets Reabiertos", "Tickets_Reabiertos"])
-        tree.header().setSectionResizeMode(QHeaderView.Stretch)
+            "Técnico", "Tickets Recibidos", "Tickets Cerrados", 
+            "Con SLA", "Dentro SLA", "% Fuera", "% En", "Reabiertos", "Mostrar"
+        ])
+        tree.header().setSectionResizeMode(QHeaderView.ResizeToContents)
 
         for _, row in df_tickets.iterrows():
-            item = QTreeWidgetItem([str(row[col]) for col in df_tickets.columns])
+            item = QTreeWidgetItem([
+                str(row["Tecnico_Asignado"]),
+                str(row["Cant_tickets_recibidos"]),
+                str(row["total_tickets_cerrados"]),
+                str(row["Cant_tickets_cerrados_con_SLA"]),
+                str(row["Cant_tickets_cerrados_dentro_SLA"]),
+                f"{row['porcentaje_fuera_del_plazo']}%",
+                f"{row['porcentaje_en_plazo']}%",
+                str(row["cuenta_de_tickets_reabiertos"])
+            ])
             
-            # Crear un botón "Mostrar" y conectar el evento para cargar y mostrar los tickets reabiertos
             btn = QPushButton("Mostrar")
             btn.clicked.connect(lambda _, t=row["Tecnico_Asignado"]: self.consulta_tickets_reabiertos(t))
             
             tree.addTopLevelItem(item)
-            tree.setItemWidget(item, 7, btn)  # Cambiado para reflejar la nueva columna
-
-        # Conectar evento de clic
-        tree.itemClicked.connect(self.on_tecnico_clicked)
-
-        # Label para mostrar la información del técnico
-        tecnico_info_label = QLabel(self.resultado_dlg)
-        tecnico_info_label.setWordWrap(True)
-        self.tecnico_info_label = tecnico_info_label
+            tree.setItemWidget(item, 8, btn)  # Columna "Mostrar"
 
         layout = QVBoxLayout()
         layout.addWidget(tree)
-        layout.addWidget(tecnico_info_label)  # Agregar label al layout
         self.resultado_dlg.setLayout(layout)
         self.resultado_dlg.exec_()
 
