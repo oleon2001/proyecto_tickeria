@@ -1,7 +1,7 @@
 SELECT 
         CONCAT(gu.realname, ' ', gu.firstname) AS tecnico_asignado,
         COUNT(DISTINCT gt.id)
-        #COUNT(DISTINCT gt.id) AS `Cant Tickets Cerrados con SLA_2`
+        #COUNT(DISTINCT gt.id) AS `tickets_pendientes_SLA`
     FROM
         glpi_tickets gt
     JOIN glpi_entities ge ON gt.entities_id = ge.id
