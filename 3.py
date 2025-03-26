@@ -198,6 +198,10 @@ class MainWindow(QMainWindow):
 
     def validar_fecha(self, fecha):
         return re.match(r'^\d{4}-\d{2}-\d{2}$', fecha) is not None
+    
+    def handle_resultados(self, resultados):
+        self.loading_dialog.hide()
+        self.mostrar_resultados(resultados)
 
     def ejecutar_consulta(self):
         fecha_ini = self.fecha_ini.text()
@@ -218,21 +222,25 @@ class MainWindow(QMainWindow):
                 COALESCE(cerrados_sla.Cant_tickets_cerrados_dentro_SLA, 0) AS Cant_tickets_cerrados_dentro_SLA,
                 COALESCE(cerrados_sla.Cant_tickets_cerrados_con_SLA, 0) AS Cant_tickets_cerrados_con_SLA,
                 COALESCE(pendientes_sla.T_pendiente_sla_vencido, 0) AS tickets_pendientes_SLA,
-                CASE 
-                    WHEN (COALESCE(cerrados_sla.Cant_tickets_cerrados_con_SLA, 0) + COALESCE(pendientes_sla.T_pendiente_sla_vencido, 0)) = 0 THEN 0 
-                    ELSE ROUND(
-                        (COALESCE(cerrados_sla.Cant_tickets_cerrados_dentro_SLA, 0) / 
-                        (COALESCE(cerrados_sla.Cant_tickets_cerrados_con_SLA, 0) + COALESCE(pendientes_sla.T_pendiente_sla_vencido, 0)) * 100, 
-                        2
-                    ) 
-                END AS `Cumplimiento SLA`,
+                ROUND(
+                    (COALESCE(cerrados_sla.Cant_tickets_cerrados_dentro_SLA, 0) / 
+                    (COALESCE(cerrados_sla.Cant_tickets_cerrados_con_SLA, 0) + COALESCE(pendientes_sla.T_pendiente_sla_vencido, 0))) * 100, 
+                    2
+                ) AS `Cumplimiento SLA`,
                 COALESCE(cerrados_count.total_tickets_cerrados, 0) AS Cant_tickets_cerrados,
                 COALESCE(recibidos.total_tickets_del_mes, 0) AS Cant_tickets_recibidos,
                 CASE
                     WHEN COALESCE(cerrados_count.total_tickets_cerrados, 0) = 0 THEN 0 
                     ELSE ROUND((COALESCE(cerrados_count.total_tickets_cerrados, 0) / COALESCE(recibidos.total_tickets_del_mes, 0)) * 100, 2) 
                 END AS `CumplimientoTR/TC`,
-                COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) AS cuenta_de_tickets_reabiertos
+                COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) AS cuenta_de_tickets_reabiertos,
+                CASE
+                    WHEN COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) = 0 THEN 'No hay tickets reabiertos'
+                    ELSE ROUND(
+                        (COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) / COALESCE(cerrados_count.total_tickets_cerrados, 1)) * 100, 
+                        2
+                    )
+                END AS `Proporción Reabiertos/Cerrados (%)`
             FROM (
                 SELECT
                     CONCAT(gu.realname, ' ', gu.firstname) AS tecnico_asignado,
@@ -266,7 +274,7 @@ class MainWindow(QMainWindow):
                     AND gt.status > 4
                     AND gt.solvedate BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC')
                                         AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
-                    AND gt.date BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                    AND gt.date BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') - INTERVAL 90 DAY
                                     AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
                     {tecnicos_condicion}
                 GROUP BY tecnico_asignado
@@ -286,6 +294,8 @@ class MainWindow(QMainWindow):
                     AND gt.status > 4
                     AND gt.solvedate BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC')
                                         AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
+                    AND gt.date BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') - INTERVAL 90 DAY
+                                AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
                     {tecnicos_condicion}
                 GROUP BY tecnico_asignado
             ) AS cerrados_sla ON recibidos.tecnico_asignado = cerrados_sla.tecnico_asignado
@@ -307,9 +317,13 @@ class MainWindow(QMainWindow):
             LEFT JOIN (
                 SELECT
                     CONCAT(gu.realname, ' ', gu.firstname) AS tecnico_asignado,
-                    SUM((((YEAR(CASE WHEN gt.solvedate IS NULL THEN DATE(%s) + INTERVAL 1 DAY ELSE gt.solvedate END) - YEAR(gt.`date`)) * 12) 
-                        + MONTH(CASE WHEN gt.solvedate IS NULL THEN DATE(%s) + INTERVAL 1 DAY ELSE gt.solvedate END) 
-                        - MONTH(gt.`date`)
+                    SUM(
+                        (
+                            (YEAR(CASE WHEN gt.solvedate IS NULL THEN DATE(%s) + INTERVAL 1 DAY ELSE gt.solvedate END) - YEAR(gt.`date`)) * 12
+                        ) + 
+                        (
+                            MONTH(CASE WHEN gt.solvedate IS NULL THEN DATE(%s) + INTERVAL 1 DAY ELSE gt.solvedate END) - MONTH(gt.`date`)
+                        )
                     ) AS T_pendiente_sla_vencido
                 FROM
                     glpi_tickets gt
@@ -323,7 +337,7 @@ class MainWindow(QMainWindow):
                     AND (
                         (gt.solvedate > gt.time_to_resolve
                         AND MONTH(gt.time_to_resolve) = MONTH(gt.date)
-                        AND MONTH(gt.solvedate) != MONTH(gt.date)
+                        AND MONTH(gt.solvedate) != MONTH(gt.date))
                         OR gt.solvedate IS NULL
                     )
                     {tecnicos_condicion}
@@ -333,6 +347,7 @@ class MainWindow(QMainWindow):
         """
 
         params = (
+            f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59',
             f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59',
             f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59',
             f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59',
@@ -351,7 +366,7 @@ class MainWindow(QMainWindow):
         df_tickets = pd.DataFrame(resultados, columns=[
             "Tecnico_Asignado", "Cerrados_dentro_SLA", "Cerrados_con_SLA",
             "tickets_pendientes_SLA", "Cumplimiento SLA", "Cant_tickets_cerrados",
-            "Cant_tickets_recibidos", "CumplimientoTR/TC", "Reabiertos"
+            "Cant_tickets_recibidos", "CumplimientoTR/TC", "Reabiertos", "Proporción Reabiertos/Cerrados (%)"
         ])
         
         self.resultado_dlg = QDialog(self)
@@ -362,7 +377,7 @@ class MainWindow(QMainWindow):
         tree.setHeaderLabels([
             "Técnico", "Cerrados dentro SLA", "Cerrados con SLA", "Pendientes SLA",
             "Cumplimiento SLA (%)", "Total Cerrados", "Tickets Recibidos",
-            "Cumplimiento TR/TC (%)", "Tickets Reabiertos", "Acción"
+            "Cumplimiento TR/TC (%)", "Tickets Reabiertos", "Proporción Reabiertos/Cerrados (%)", "Acción"
         ])
         tree.header().setSectionResizeMode(QHeaderView.ResizeToContents)
 
@@ -376,13 +391,14 @@ class MainWindow(QMainWindow):
                 str(row["Cant_tickets_cerrados"]),
                 str(row["Cant_tickets_recibidos"]),
                 str(row["CumplimientoTR/TC"]),
-                str(row["Reabiertos"])
+                str(row["Reabiertos"]),
+                str(row["Proporción Reabiertos/Cerrados (%)"])
             ])
             
             btn = QPushButton("Mostrar")
             btn.clicked.connect(lambda _, t=row["Tecnico_Asignado"]: self.consulta_tickets_reabiertos(t))
             tree.addTopLevelItem(item)
-            tree.setItemWidget(item, 9, btn)
+            tree.setItemWidget(item, 10, btn)
 
         tree.itemClicked.connect(self.on_tecnico_clicked)
         self.tecnico_info_label = QLabel()
