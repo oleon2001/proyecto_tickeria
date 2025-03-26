@@ -65,6 +65,7 @@ class WorkerThread(QThread):
         try:
             cursor.execute(self.query, self.params)
             resultados = cursor.fetchall()
+            print("Resultados obtenidos:")
         except mysql.connector.Error as err:
             print("Error ejecutando el query:", err)
             resultados = []
@@ -221,21 +222,17 @@ class MainWindow(QMainWindow):
                     WHEN (COALESCE(cerrados_sla.Cant_tickets_cerrados_con_SLA, 0) + COALESCE(pendientes_sla.T_pendiente_sla_vencido, 0)) = 0 THEN 0 
                     ELSE ROUND(
                         (COALESCE(cerrados_sla.Cant_tickets_cerrados_dentro_SLA, 0) / 
-                        (COALESCE(cerrados_sla.Cant_tickets_cerrados_con_SLA, 0) + COALESCE(pendientes_sla.T_pendiente_sla_vencido, 0)) * 100), 
+                        (COALESCE(cerrados_sla.Cant_tickets_cerrados_con_SLA, 0) + COALESCE(pendientes_sla.T_pendiente_sla_vencido, 0)) * 100, 
                         2
                     ) 
                 END AS `Cumplimiento SLA`,
                 COALESCE(cerrados_count.total_tickets_cerrados, 0) AS Cant_tickets_cerrados,
                 COALESCE(recibidos.total_tickets_del_mes, 0) AS Cant_tickets_recibidos,
-                COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) AS cuenta_de_tickets_reabiertos,
                 CASE
-                    WHEN COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) = 0 THEN 'no hubo ticket reabierto'
-                    ELSE 
-                        CASE 
-                            WHEN COALESCE(cerrados_count.total_tickets_cerrados, 0) = 0 THEN 'N/A'
-                            ELSE ROUND(CAST(COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) AS DECIMAL) / COALESCE(cerrados_count.total_tickets_cerrados, 0) * 100, 2)
-                        END
-                END AS `ticketsReabiertos/ticketsCerrados`
+                    WHEN COALESCE(cerrados_count.total_tickets_cerrados, 0) = 0 THEN 0 
+                    ELSE ROUND((COALESCE(cerrados_count.total_tickets_cerrados, 0) / COALESCE(recibidos.total_tickets_del_mes, 0)) * 100, 2) 
+                END AS `CumplimientoTR/TC`,
+                COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) AS cuenta_de_tickets_reabiertos
             FROM (
                 SELECT
                     CONCAT(gu.realname, ' ', gu.firstname) AS tecnico_asignado,
@@ -269,7 +266,7 @@ class MainWindow(QMainWindow):
                     AND gt.status > 4
                     AND gt.solvedate BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC')
                                         AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
-                    AND gt.date BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') - INTERVAL 90 DAY
+                    AND gt.date BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC')
                                     AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
                     {tecnicos_condicion}
                 GROUP BY tecnico_asignado
@@ -289,8 +286,6 @@ class MainWindow(QMainWindow):
                     AND gt.status > 4
                     AND gt.solvedate BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC')
                                         AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
-                    AND gt.date BETWEEN CONVERT_TZ(%s, 'America/Caracas', 'UTC') - INTERVAL 90 DAY
-                                    AND CONVERT_TZ(%s, 'America/Caracas', 'UTC')
                     {tecnicos_condicion}
                 GROUP BY tecnico_asignado
             ) AS cerrados_sla ON recibidos.tecnico_asignado = cerrados_sla.tecnico_asignado
@@ -304,15 +299,15 @@ class MainWindow(QMainWindow):
                 INNER JOIN glpi_users gu ON gi.users_id = gu.id
                 WHERE
                     gi.status = 4
-                    AND gi.users_id_approval > 0 
+                    AND gi.users_id_approval > 0
                     AND CONVERT_TZ(gi.date_approval, 'UTC', 'America/Caracas') BETWEEN %s AND %s
+                    {tecnicos_condicion}
                 GROUP BY tecnico_asignado
             ) AS reabiertos ON recibidos.tecnico_asignado = reabiertos.tecnico_asignado
             LEFT JOIN (
                 SELECT
                     CONCAT(gu.realname, ' ', gu.firstname) AS tecnico_asignado,
-                    SUM(
-                        (YEAR(CASE WHEN gt.solvedate IS NULL THEN DATE(%s) + INTERVAL 1 DAY ELSE gt.solvedate END) - YEAR(gt.`date`)) * 12 
+                    SUM((((YEAR(CASE WHEN gt.solvedate IS NULL THEN DATE(%s) + INTERVAL 1 DAY ELSE gt.solvedate END) - YEAR(gt.`date`)) * 12) 
                         + MONTH(CASE WHEN gt.solvedate IS NULL THEN DATE(%s) + INTERVAL 1 DAY ELSE gt.solvedate END) 
                         - MONTH(gt.`date`)
                     ) AS T_pendiente_sla_vencido
@@ -328,7 +323,7 @@ class MainWindow(QMainWindow):
                     AND (
                         (gt.solvedate > gt.time_to_resolve
                         AND MONTH(gt.time_to_resolve) = MONTH(gt.date)
-                        AND MONTH(gt.solvedate) != MONTH(gt.date))
+                        AND MONTH(gt.solvedate) != MONTH(gt.date)
                         OR gt.solvedate IS NULL
                     )
                     {tecnicos_condicion}
@@ -343,8 +338,7 @@ class MainWindow(QMainWindow):
             f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59',
             f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59',
             f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59',
-            f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59',
-            f'{fecha_fin} 23:59:59', f'{fecha_fin} 23:59:59',
+            fecha_fin, fecha_fin,
             f'{fecha_ini} 00:00:00', f'{fecha_fin} 23:59:59'
         )
 
@@ -353,19 +347,11 @@ class MainWindow(QMainWindow):
         self.worker_thread.done.connect(self.handle_resultados)
         self.worker_thread.start()
 
-    def handle_resultados(self, resultados):
-        self.loading_dialog.hide()
-        if not resultados:
-            QMessageBox.information(self, "Resultados", "No se encontraron resultados.")
-            return
-        self.mostrar_resultados(resultados)
-
     def mostrar_resultados(self, resultados):
         df_tickets = pd.DataFrame(resultados, columns=[
             "Tecnico_Asignado", "Cerrados_dentro_SLA", "Cerrados_con_SLA",
-            "tickets_pendientes_SLA", "Cumplimiento_SLA", "Cant_tickets_cerrados",
-            "Cant_tickets_recibidos", "cuenta_de_tickets_reabiertos",
-            "ticketsReabiertos/ticketsCerrados"
+            "tickets_pendientes_SLA", "Cumplimiento SLA", "Cant_tickets_cerrados",
+            "Cant_tickets_recibidos", "CumplimientoTR/TC", "Reabiertos"
         ])
         
         self.resultado_dlg = QDialog(self)
@@ -374,9 +360,9 @@ class MainWindow(QMainWindow):
 
         tree = QTreeWidget()
         tree.setHeaderLabels([
-            "Técnico", "Cerrados dentro SLA", "Cerrados con SLA",
-            "Pendientes SLA", "Cumplimiento SLA (%)", "Total Cerrados",
-            "Tickets Recibidos", "Tickets Reabiertos", "Reabiertos/Cerrados (%)", "Acción"
+            "Técnico", "Cerrados dentro SLA", "Cerrados con SLA", "Pendientes SLA",
+            "Cumplimiento SLA (%)", "Total Cerrados", "Tickets Recibidos",
+            "Cumplimiento TR/TC (%)", "Tickets Reabiertos", "Acción"
         ])
         tree.header().setSectionResizeMode(QHeaderView.ResizeToContents)
 
@@ -386,11 +372,11 @@ class MainWindow(QMainWindow):
                 str(row["Cerrados_dentro_SLA"]),
                 str(row["Cerrados_con_SLA"]),
                 str(row["tickets_pendientes_SLA"]),
-                str(row["Cumplimiento_SLA"]),
+                str(row["Cumplimiento SLA"]),
                 str(row["Cant_tickets_cerrados"]),
                 str(row["Cant_tickets_recibidos"]),
-                str(row["cuenta_de_tickets_reabiertos"]),
-                str(row["ticketsReabiertos/ticketsCerrados"])
+                str(row["CumplimientoTR/TC"]),
+                str(row["Reabiertos"])
             ])
             
             btn = QPushButton("Mostrar")
@@ -413,24 +399,18 @@ class MainWindow(QMainWindow):
 
     def consulta_tickets_reabiertos(self, tecnico):
         query2 = """
-            SELECT 
-                gi.items_id AS Nro_Ticket,
-                MAX(DATE_FORMAT(CONVERT_TZ(gi.date_approval, 'UTC', 'America/Caracas'), GET_FORMAT(DATE, 'ISO'))) AS Fecha_Reapertura,
-                MAX(DATE_FORMAT(CONVERT_TZ(gt.date_creation, 'UTC', 'America/Caracas'), GET_FORMAT(DATE, 'ISO'))) AS Fecha_Apertura,
-                CONCAT(gu.realname, ' ', gu.firstname) AS Tecnico_Asignado
-            FROM 
-                glpi_itilsolutions gi
-            INNER JOIN 
-                glpi_tickets gt ON gt.id = gi.items_id
-            INNER JOIN 
-                glpi_users gu ON gu.id = gi.users_id_approval
-            WHERE 
-                gi.status = 4 
+            SELECT gi.items_id AS Nro_Ticket,
+                MAX(DATE_FORMAT(gi.date_approval,GET_FORMAT(DATE,'ISO'))) AS Fecha_Reapertura,
+                MAX(DATE_FORMAT(gt.date_creation,GET_FORMAT(DATE,'ISO'))) AS Fecha_Apertura,
+                CONCAT(gu.realname, " ", gu.firstname) AS Tecnico_Asignado
+            FROM glpi_itilsolutions gi
+            INNER JOIN glpi_tickets gt ON gt.id = gi.items_id
+            INNER JOIN glpi_users gu ON gu.id = gi.users_id
+            WHERE gi.status = 4 
                 AND gi.users_id_approval > 0 
-                AND CONVERT_TZ(gi.date_approval, 'UTC', 'America/Caracas') BETWEEN %s AND %s
+                AND CONVERT_TZ(gi.date_approval,'UTC', 'America/Caracas') BETWEEN %s AND %s
                 AND CONCAT(gu.realname, ' ', gu.firstname) = %s
-            GROUP BY 
-                gi.items_id;
+            GROUP BY Nro_Ticket;
         """
         
         params = (
