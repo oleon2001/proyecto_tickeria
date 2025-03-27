@@ -284,10 +284,41 @@ class ResultsDialog(QDialog):
         # TreeWidget para mostrar resultados
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels([
-            "Técnico", "Cerrados dentro SLA", "Cerrados con SLA", "Pendientes SLA",
-            "Cumplimiento SLA (%)", "Total Cerrados", "Tickets Recibidos",
-            "Tickets Reabiertos", "Proporción Reabiertos/Cerrados (%)", "Acción"
-        ])
+        "Técnico", 
+        "Dentro SLA", 
+        "Con SLA", 
+        "Pendientes",
+        "Cumplimiento SLA", 
+        "Total Cerrados", 
+        "Recibidos",
+        "Reabiertos", 
+        "% Reapertura R/C", 
+        "Acción"
+    ])
+        self.tree.setColumnWidth(0, 220)   # Técnico
+        self.tree.setColumnWidth(1, 80)    # Dentro SLA
+        self.tree.setColumnWidth(2, 80)    # Con SLA
+        self.tree.setColumnWidth(3, 90)    # Pendientes
+        self.tree.setColumnWidth(4, 100)   # Cumplimiento
+        self.tree.setColumnWidth(5, 90)    # Total Cerrados
+        self.tree.setColumnWidth(6, 80)    # Recibidos
+        self.tree.setColumnWidth(7, 80)    # Reabiertos
+        self.tree.setColumnWidth(8, 90)    # % Reapertura
+        self.tree.setColumnWidth(9, 80)    # Acción
+
+        self.tree.setStyleSheet("""
+        QTreeWidget {
+            background-color: #383838;
+            border: 1px solid #4a4a4a;
+            font-size: 12px;
+            color: #e0e0e0;
+        }
+        QTreeWidget::item {
+            border-bottom: 1px solid #4a4a4a;
+            padding: 4px;
+        }
+         """)
+        
         self.tree.header().setSectionResizeMode(QHeaderView.Interactive)
         self.tree.setAlternatingRowColors(True)
         
