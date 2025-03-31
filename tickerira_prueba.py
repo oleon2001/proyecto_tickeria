@@ -396,7 +396,7 @@ class MainWindow(QMainWindow):
                 COALESCE(recibidos.total_tickets_del_mes, 0) AS Cant_tickets_recibidos,
                 COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) AS cuenta_de_tickets_reabiertos,
                 CASE
-                    WHEN COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) = 0 THEN 'No hay tickets reabiertos'
+                    WHEN COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) = 0 THEN '0'
                     ELSE ROUND(
                         (COALESCE(reabiertos.cuenta_de_tickets_reabiertos, 0) / COALESCE(cerrados_count.total_tickets_cerrados, 1)) * 100, 
                         2
