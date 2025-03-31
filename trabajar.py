@@ -55,13 +55,11 @@ class DatabaseConnector:
         return [r[0] for r in resultados]
 
 class LoadingDialog(QDialog):
-    cancel_requested = pyqtSignal()  # Señal para cancelar la operación
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setModal(True)
         self.setWindowTitle("")
-        self.setFixedSize(300, 150)
+        self.setFixedSize(300, 120)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)  # Eliminar barra de título
         
         layout = QVBoxLayout()
@@ -95,26 +93,8 @@ class LoadingDialog(QDialog):
             }}
         """)
         
-        self.cancel_button = QPushButton("Cancelar")
-        self.cancel_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['danger']};
-                color: {COLORS['light']};
-                border: none;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-size: 14px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['dark']};
-            }}
-        """)
-        self.cancel_button.clicked.connect(self.emit_cancel_signal)
-
         layout.addWidget(self.label)
         layout.addWidget(self.progress)
-        layout.addWidget(self.cancel_button)
         
         self.setStyleSheet(f"""
             QDialog {{
@@ -123,10 +103,6 @@ class LoadingDialog(QDialog):
                 border: 2px solid {COLORS['primary']};
             }}
         """)
-
-    def emit_cancel_signal(self):
-        self.cancel_requested.emit()  # Emitir la señal de cancelación
-        self.close()
 
 class WorkerThread(QThread):
     done = pyqtSignal(object)
