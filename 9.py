@@ -58,11 +58,13 @@ class LoadingDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setModal(True)
-        self.setWindowTitle("Cargando...")
+        self.setWindowTitle("")
         self.setFixedSize(300, 120)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowCloseButtonHint)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)  # Eliminar barra de título
         
         layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)  # Márgenes internos
+        layout.setSpacing(10)  # Espaciado entre elementos
         self.setLayout(layout)
         
         self.label = QLabel("Procesando solicitud...")
@@ -70,13 +72,14 @@ class LoadingDialog(QDialog):
         self.label.setStyleSheet(f"""
             QLabel {{
                 color: {COLORS['light']};
-                font-size: 14px;
-                font-weight: 500;
+                font-size: 16px;
+                font-weight: bold;
+                background: transparent; /* Fondo transparente */
             }}
         """)
         
         self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
+        self.progress.setRange(0, 0)  # Barra de progreso indeterminada
         self.progress.setTextVisible(False)
         self.progress.setStyleSheet(f"""
             QProgressBar {{
@@ -96,7 +99,7 @@ class LoadingDialog(QDialog):
         self.setStyleSheet(f"""
             QDialog {{
                 background-color: {COLORS['secondary']};
-                border-radius: 10px;
+                border-radius: 12px;
                 border: 2px solid {COLORS['primary']};
             }}
         """)
@@ -534,6 +537,19 @@ class MainWindow(QMainWindow):
             QDialog {{
                 background-color: {COLORS['background']};
             }}
+        """)
+        
+        tree = QTreeWidget()
+        tree.setHeaderLabels([
+            "Técnico", "Cerrados SLA ✔", "Total SLA", "Pendientes", 
+            "Cumplimiento (%)", "Total Cerrados", "Recibidos",
+            "Reabiertos", "Reab./Cerrados (%)", "Acción"
+        ])
+        
+        tree.header().setDefaultAlignment(Qt.AlignCenter)
+        tree.header().setSectionResizeMode(QHeaderView.ResizeToContents)
+        
+        tree.setStyleSheet(f"""
             QTreeWidget {{
                 background: {COLORS['light']};
                 border: none;
@@ -550,21 +566,16 @@ class MainWindow(QMainWindow):
             QTreeWidget::item {{
                 border-bottom: 1px solid {COLORS['secondary']}15;
                 padding: 8px 0;
+                color: {COLORS['text']}; /* Mantener el color del texto */
+            }}
+            QTreeWidget::item:selected {{
+                background-color: {COLORS['primary']}15;
+                color: {COLORS['text']}; /* Evitar que el texto se vuelva blanco */
             }}
             QTreeWidget::item:hover {{
                 background-color: {COLORS['primary']}15;
             }}
         """)
-        
-        tree = QTreeWidget()
-        tree.setHeaderLabels([
-            "Técnico", "Cerrados SLA ✔", "Total SLA", "Pendientes", 
-            "Cumplimiento (%)", "Total Cerrados", "Recibidos",
-            "Reabiertos", "Reab./Cerrados (%)", "Acción"
-        ])
-        
-        tree.header().setDefaultAlignment(Qt.AlignCenter)
-        tree.header().setSectionResizeMode(QHeaderView.ResizeToContents)
         
         for _, row in df_tickets.iterrows():
             item = QTreeWidgetItem([
